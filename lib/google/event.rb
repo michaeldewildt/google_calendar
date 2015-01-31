@@ -17,7 +17,9 @@ module Google
   # * +end_time+ - The end time of the event (Time object, defaults to one hour from now).  Read Write.
   # * +recurrence+ - A hash containing recurrence info for repeating events. Read write.
   # * +calendar+ - What calendar the event belongs to. Read Write.
-  # * +all_day + - Does the event run all day. Read Write.
+  # * +all_day_event + - Boolean to signal google calendar to create all day or standard event. Read Write. (not used in Google API)
+  # * +start_date + - The start date of the event (Date object, defaults to today). Read Write. (used for all_day event)
+  # * +end_date + - The end time of the event (Date object, defaults to tomorrow).  Read Write. (used for all_day event)
   # * +quickadd+ - A string that Google parses when setting up a new event.  If set and then saved it will take priority over any attributes you have set. Read Write.
   # * +reminders+ - A hash containing reminders. Read Write.
   # * +attendees+ - An array of hashes containing information about attendees. Read Write
@@ -28,8 +30,10 @@ module Google
   # * +visibility+ - The visibility of the event (*'default'*, 'public', 'private', 'confidential'). Read Write.
   #
   class Event
-    attr_reader :raw, :html_link, :status
+    attr_reader :raw, :html_link, :status, :all_day_event
     attr_accessor :id, :title, :location, :calendar, :quickadd, :transparency, :attendees, :description, :reminders, :recurrence, :visibility
+
+    alias_method :all_day_event?, :all_day_event
 
     #
     # Create a new event, and optionally set it's attributes.
@@ -54,13 +58,13 @@ module Google
     #                   ]
     #
     def initialize(params = {})
-      [:id, :status, :raw, :html_link, :title, :location, :calendar, :quickadd, :attendees, :description, :reminders, :recurrence, :start_time, :end_time].each do |attribute|
+      [:id, :status, :raw, :html_link, :title, :location, :calendar, :quickadd, :attendees, :description, :reminders, :recurrence, :start_time, :end_time, :start_date, :end_date].each do |attribute|
         instance_variable_set("@#{attribute}", params[attribute])
       end
 
-      self.visibility   = params[:visibility]
-      self.transparency = params[:transparency]
-      self.all_day      = params[:all_day] if params[:all_day]
+      self.visibility     = params[:visibility]
+      self.transparency   = params[:transparency]
+      self.all_day_event  = !!params[:all_day_event]
     end
 
     #
@@ -102,28 +106,57 @@ module Google
     #
     def end_time=(time)
       @end_time = Event.parse_time(time)
-      raise ArgumentError, "End Time must be either Time or String" unless (time.is_a?(String) || time.is_a?(Time))
-      @end_time = (time.is_a? String) ? Time.parse(time) : time.dup.utc
+    end
+
+
+    #
+    # Get the start_date of the event.
+    #
+    # If no date is set (i.e. new event) it defaults to the today.
+    #
+    def start_date
+      @start_date ||= Date.today
+      @start_date.is_a?(String) ? @start_date : @start_date.strftime('%Y-%m-%d')
     end
 
     #
-    # Returns whether the Event is an all-day event, based on whether the event starts at the beginning and ends at the end of the day.
+    # Sets the start_date of the Event. Must be a Time/Date object or a parse-able string representation of a time.
+    # Only used for all day events.
     #
-    def all_day?
-      time = (@start_time.is_a?  String) ? Time.parse(@start_time) : @start_time.dup.utc
-      duration % (24 * 60 * 60) == 0 && time == Time.local(time.year,time.month,time.day)
+    def start_date=(date)
+      @start_date = Event.parse_date(date)
     end
+
+    #
+    # Get the end_date of the event.
+    #
+    # If no date is set (i.e. new event) it defaults to the start_date.
+    #
+    def end_date
+      @end_date ||= @start_date
+      @end_date.is_a?(String) ? @end_date : @end_date.strftime('%Y-%m-%d')
+    end
+
+    #
+    # Sets the end_date of the Event. Must be a Time/Date object or a parse-able string representation of a time.
+    # Only used for all day events.
+    #
+    def end_date=(date)
+      @end_date = Event.parse_date(date)
+    end
+
 
     #
     # Makes an event all day, by setting it's start time to the passed in time and it's end time 24 hours later.
     # Note: this will clobber both the start and end times currently set.
     #
-    def all_day=(time)
-      if time.class == String
-        time = Time.parse(time)
+    def all_day_event=(all_day_event)
+      @all_day_event = all_day_event
+
+      if @all_day_event
+        self.start_date = Time.parse(self.start_time).to_date if self.instance_variable_get(:@start_date).nil?
+        self.end_date = Time.parse(self.end_time).to_date if self.instance_variable_get(:@end_date).nil?
       end
-      @start_time = time.strftime("%Y-%m-%d")
-      @end_time = (time + 24*60*60).strftime("%Y-%m-%d")
     end
 
     #
@@ -231,25 +264,38 @@ module Google
     # Google JSON representation of an event object.
     #
     def to_json
-      "{
-        \"summary\": \"#{title}\",
-        \"visibility\": \"#{visibility}\",
-        \"description\": \"#{description}\",
-        \"location\": \"#{location}\",
-        \"start\": {
-          \"dateTime\": \"#{start_time}\"
-          #{timezone_needed? ? local_timezone_json : ''}
-        },
-        \"end\": {
-          \"dateTime\": \"#{end_time}\"
-          #{timezone_needed? ? local_timezone_json : ''}
-        },
-        #{recurrence_json}
-        #{attendees_json}
-        \"reminders\": {
-          #{reminders_json}
-        }
-      }"
+      jsonObject = {
+          summary: title,
+          visibility: visibility,
+          description: description,
+          location: location,
+          start: {},
+          end: {},
+          reminders: reminders_json
+      }
+
+      if all_day_event?
+        jsonObject[:start][:date] = start_date
+        jsonObject[:end][:date] = end_date
+      else
+        jsonObject[:start][:dateTime] = start_time
+        jsonObject[:end][:dateTime] = end_time
+      end
+
+      if timezone_needed?
+        jsonObject[:start][:timeZone] = local_timezone
+        jsonObject[:end][:timeZone] = local_timezone
+      end
+
+      if att_json = attendees_json
+        jsonObject[:attendees] = att_json
+      end
+
+      if rec_json = recurrence_json
+        jsonObject[:recurrence] = rec_json
+      end
+
+      jsonObject.to_json
     end
 
     #
@@ -258,15 +304,13 @@ module Google
     def attendees_json
       return unless @attendees
 
-      attendees = @attendees.map do |attendee|
-        "{
-          \"displayName\": \"#{attendee['displayName']}\",
-          \"email\": \"#{attendee['email']}\",
-          \"responseStatus\": \"#{attendee['responseStatus']}\"
-        }"
-      end.join(",\n")
-
-      "\"attendees\": [\n#{attendees}],"
+      return @attendees.map do |attendee|
+        {
+            displayName: attendee['displayName'],
+            email: attendee['email'],
+            responseStatus: attendee['responseStatus']
+        }
+      end
     end
 
     #
@@ -275,14 +319,18 @@ module Google
     def reminders_json
       if reminders && reminders.is_a?(Hash) && reminders['overrides']
         overrides = reminders['overrides'].map do |reminder|
-          "{
-            \"method\": \"#{reminder['method']}\",
-            \"minutes\": #{reminder['minutes']}
-          }"
-        end.join(",\n")
-        "\n\"useDefault\": false,\n\"overrides\": [\n#{overrides}]"
+          {
+              method: reminder['method'],
+              minutes: reminder['minutes']
+          }
+        end
+
+        return {
+            useDefault: false,
+            overrides: overrides
+        }
       else
-        "\"useDefault\": true"
+        {useDefault: true}
       end
     end
 
@@ -296,8 +344,8 @@ module Google
     #
     # JSON representation of local timezone
     #
-    def local_timezone_json
-      ",\"timeZone\" : \"#{Time.now.getlocal.zone}\""
+    def local_timezone
+      Time.now.getlocal.zone
     end
 
     #
@@ -307,10 +355,12 @@ module Google
       return unless @recurrence && @recurrence[:freq]
 
       @recurrence[:until] = @recurrence[:until].strftime('%Y%m%dT%H%M%SZ') if @recurrence[:until]
-      rrule = "RRULE:" + @recurrence.collect { |k,v| "#{k}=#{v}" }.join(';').upcase
+
+      rule_string = @recurrence.collect { |k,v| "#{k}=#{v}" }.join(';').upcase
+
       @recurrence[:until] = Time.parse(@recurrence[:until]) if @recurrence[:until]
 
-      "\"recurrence\": [\n\"#{rrule}\"],"
+      ["RRULE:#{rule_string}"]
     end
 
     #
@@ -415,8 +465,20 @@ module Google
     # A utility method used centralize time parsing.
     #
     def self.parse_time(time) #:nodoc
-      raise ArgumentError, "Start Time must be either Time or String" unless (time.is_a?(String) || time.is_a?(Time))
+      raise ArgumentError, "Time must be either Time or String" unless (time.is_a?(String) || time.is_a?(Time))
       (time.is_a? String) ? Time.parse(time) : time.dup.utc
+    end
+
+    def self.parse_date(date)
+      raise ArgumentError, "Date must be either Date, Time or String" unless (date.is_a?(String) || date.is_a?(Time) || date.is_a?(Date))
+
+      if (date.is_a?(String))
+        Time.parse(date).to_date
+      elsif (date.is_a?(Time))
+        date.to_date
+      elsif (date.is_a?(Date))
+        date
+      end
     end
 
     #

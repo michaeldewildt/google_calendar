@@ -244,47 +244,73 @@ class TestGoogleCalendar < Minitest::Test
   end # Connected context
 
   context "Event instance methods" do
-    context "#all_day?" do
+    context "#all_day_event?" do
+      should "be an alias of #all_day_event" do
+        @event = Event.new
+
+        @event.all_day_event = false
+        assert_equal @event.all_day_event, @event.all_day_event?
+
+        @event.all_day_event = true
+        assert_equal @event.all_day_event, @event.all_day_event?
+      end
+
       context "when the event is marked as All Day in google calendar" do
         should "be true" do
-          @event = Event.new(:start_time => "2012-03-31", :end_time => "2012-04-01")
-          assert @event.all_day?
+          @event = Event.new(:start_date => "2012-03-31", :end_date => "2012-04-01", :all_day_event => true)
+          assert @event.all_day_event?
         end
       end
       context "when the event is marked as All Day in google calendar and have more than one day" do
         should "be true" do
-          @event = Event.new(:start_time => "2012-03-31", :end_time => "2012-04-03")
-          assert @event.all_day?
+          @event = Event.new(:start_date => "2012-03-31", :end_date => "2012-04-03", :all_day_event => true)
+          assert @event.all_day_event?
         end
       end
       context "when the event is not marked as All Day in google calendar and has duration of one whole day" do
         should "be false" do
-          @event = Event.new(:start_time => "2012-03-27T10:00:00.000-07:00", :end_time => "2012-03-28T10:00:00.000-07:00")
-          assert !@event.all_day?
+          @event = Event.new(:start_time => "2012-03-27T10:00:00.000-07:00", :end_time => "2012-03-28T10:00:00.000-07:00", :all_day_event => false)
+          assert !@event.all_day_event?
         end
       end
       context "when the event is not an all-day event" do
         should "be false" do
-          @event = Event.new(:start_time => "2012-03-27T10:00:00.000-07:00", :end_time => "2012-03-27T10:30:00.000-07:00")
-          assert !@event.all_day?
+          @event = Event.new(:start_time => "2012-03-27T10:00:00.000-07:00", :end_time => "2012-03-27T10:30:00.000-07:00", :all_day_event => false)
+          assert !@event.all_day_event?
         end
       end
     end
 
-    context "#all_day=" do
-      context "sets the start and end time to the appropriate values for an all day event on that day" do
-        should "set the start time" do
-          @event = Event.new :all_day => Time.parse("2012-05-02 12:24")
-          assert_equal @event.start_time, "2012-05-02"
+    context "#all_day_event=" do
+      setup do
+        @event = Event.new
+        @event.start_time = "2012-03-27T10:00:00.000-07:00"
+        @event.end_time = "2012-03-28T10:30:00.000-07:00"
+      end
+
+      context "when start_date and/or end_date is not set" do
+        should "set the start date from start_time" do
+          @event.all_day_event = true
+          assert_equal "2012-03-27", @event.start_date
         end
-        should "set the end time" do
-          @event = Event.new :all_day => Time.parse("2012-05-02 12:24")
-          assert_equal @event.end_time, "2012-05-03"
+        should "set the end_date from end_time" do
+          @event.all_day_event = true
+          assert_equal "2012-03-28", @event.end_date
         end
-        should "be able to handle strings" do
-          @event = Event.new :all_day => "2012-05-02 12:24"
-          assert_equal @event.start_time, "2012-05-02"
-          assert_equal @event.end_time, "2012-05-03"
+      end
+
+      context "when start_date and/or end_date is set" do
+        setup do
+          @event.start_date = "2013-01-01"
+          @event.end_date = "2013-02-01"
+        end
+        should "set not set start date from start_time" do
+          @event.all_day_event = true
+          assert_equal @event.start_date, "2013-01-01"
+        end
+        should "set not set end_date from end_time" do
+          @event.all_day_event = true
+          assert_equal @event.end_date, "2013-02-01"
         end
       end
     end
@@ -302,35 +328,73 @@ class TestGoogleCalendar < Minitest::Test
     end
 
     context "event json" do
-      should "be correct format" do
-        now = Time.now
-        @event = Event.new
-        @event.start_time = now
-        @event.end_time = now + (60 * 60)
-        @event.title = "Go Swimming"
-        @event.description = "The polar bear plunge"
-        @event.location = "In the arctic ocean"
-        @event.transparency = "opaque"
-        @event.reminders = { 'useDefault'  => false, 'overrides' => ['minutes' => 10, 'method' => "popup"]}
-        @event.attendees = [
-                            {'email' => 'some.a.one@gmail.com', 'displayName' => 'Some A One', 'responseStatus' => 'tentative'},
-                            {'email' => 'some.b.one@gmail.com', 'displayName' => 'Some B One', 'responseStatus' => 'tentative'}
-                          ]
+      context "for none all day event" do
+        should "be correct format" do
+          now = Time.now
+          @event = Event.new
+          @event.start_time = now
+          @event.end_time = now + (60 * 60)
+          @event.title = "Go Swimming"
+          @event.description = "The polar bear plunge"
+          @event.location = "In the arctic ocean"
+          @event.transparency = "opaque"
+          @event.reminders = { 'useDefault'  => false, 'overrides' => ['minutes' => 10, 'method' => "popup"]}
+          @event.attendees = [
+              {'email' => 'some.a.one@gmail.com', 'displayName' => 'Some A One', 'responseStatus' => 'tentative'},
+              {'email' => 'some.b.one@gmail.com', 'displayName' => 'Some B One', 'responseStatus' => 'tentative'}
+          ]
 
-        expected_structure = {
-          "summary" => "Go Swimming",
-          "visibility"=>"default",
-          "description" => "The polar bear plunge",
-          "location" => "In the arctic ocean",
-          "start" => {"dateTime" => "#{@event.start_time}"},
-          "end" => {"dateTime" => "#{@event.end_time}"},
-          "attendees" => [
-            {"displayName" => "Some A One", "email" => "some.a.one@gmail.com", "responseStatus" => "tentative"},
-            {"displayName" => "Some B One", "email" => "some.b.one@gmail.com", "responseStatus" => "tentative"}
-          ],
-          "reminders" => {"useDefault" => false, "overrides" => [{"method" => "popup", "minutes" => 10}]}
-        }
-        assert_equal JSON.parse(@event.to_json), expected_structure
+          expected_structure = {
+              "summary" => "Go Swimming",
+              "visibility"=>"default",
+              "description" => "The polar bear plunge",
+              "location" => "In the arctic ocean",
+              "start" => {"dateTime" => "#{@event.start_time}"},
+              "end" => {"dateTime" => "#{@event.end_time}"},
+              "attendees" => [
+                  {"displayName" => "Some A One", "email" => "some.a.one@gmail.com", "responseStatus" => "tentative"},
+                  {"displayName" => "Some B One", "email" => "some.b.one@gmail.com", "responseStatus" => "tentative"}
+              ],
+              "reminders" => {"useDefault" => false, "overrides" => [{"method" => "popup", "minutes" => 10}]}
+          }
+
+          assert_equal JSON.parse(@event.to_json), expected_structure
+        end
+      end
+
+      context "for all day event" do
+        should "be correct format" do
+          today = Time.now
+          @event = Event.new
+          @event.all_day_event = true
+          @event.start_date = today
+          @event.end_time = today + 24*60*60
+          @event.title = "Go Swimming"
+          @event.description = "The polar bear plunge"
+          @event.location = "In the arctic ocean"
+          @event.transparency = "opaque"
+          @event.reminders = { 'useDefault'  => false, 'overrides' => ['minutes' => 10, 'method' => "popup"]}
+          @event.attendees = [
+              {'email' => 'some.a.one@gmail.com', 'displayName' => 'Some A One', 'responseStatus' => 'tentative'},
+              {'email' => 'some.b.one@gmail.com', 'displayName' => 'Some B One', 'responseStatus' => 'tentative'}
+          ]
+
+          expected_structure = {
+              "summary" => "Go Swimming",
+              "visibility"=>"default",
+              "description" => "The polar bear plunge",
+              "location" => "In the arctic ocean",
+              "start" => {"date" => "#{@event.start_date}"},
+              "end" => {"date" => "#{@event.end_date}"},
+              "attendees" => [
+                  {"displayName" => "Some A One", "email" => "some.a.one@gmail.com", "responseStatus" => "tentative"},
+                  {"displayName" => "Some B One", "email" => "some.b.one@gmail.com", "responseStatus" => "tentative"}
+              ],
+              "reminders" => {"useDefault" => false, "overrides" => [{"method" => "popup", "minutes" => 10}]}
+          }
+
+          assert_equal JSON.parse(@event.to_json), expected_structure
+        end
       end
     end
 
