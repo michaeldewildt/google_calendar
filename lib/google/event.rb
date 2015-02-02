@@ -31,7 +31,7 @@ module Google
   #
   class Event
     attr_reader :raw, :html_link, :status, :all_day_event
-    attr_accessor :id, :title, :location, :calendar, :quickadd, :transparency, :attendees, :description, :reminders, :recurrence, :visibility
+    attr_accessor :id, :title, :location, :calendar, :quickadd, :transparency, :attendees, :description, :reminders, :recurrence, :visibility, :timezone
 
     alias_method :all_day_event?, :all_day_event
 
@@ -283,8 +283,8 @@ module Google
       end
 
       if timezone_needed?
-        jsonObject[:start][:timeZone] = local_timezone
-        jsonObject[:end][:timeZone] = local_timezone
+        jsonObject[:start][:timeZone] = timezone
+        jsonObject[:end][:timeZone] = timezone
       end
 
       if att_json = attendees_json
@@ -344,8 +344,8 @@ module Google
     #
     # JSON representation of local timezone
     #
-    def local_timezone
-      Time.now.getlocal.zone
+    def timezone=(timezone)
+      @timezone = timezone
     end
 
     #
